@@ -68,7 +68,7 @@ namespace my_function {
         void swap(function& other) noexcept {
             function tmp(std::move(other));
             other = std::move(*this);
-            this = std::move(tmp);
+            *this = std::move(tmp);
         }
 
         explicit operator bool() const noexcept {
@@ -76,7 +76,12 @@ namespace my_function {
         }
 
         R operator()(Args&& ... a) const {
-            return ptr->call(std::forward<Args>(a)...);
+            if (is_small) {
+                auto c = reinterpret_cast<concept const*>(&buffer);
+                return c->call(std::forward<Args>(a)...);
+            } else {
+                return ptr->call(std::forward<Args>(a)...);
+            }
         }
 
     private:
@@ -116,7 +121,9 @@ namespace my_function {
 
         template <typename F>
         struct model : concept {
-            model(F f) : f(std::move(f)) {}
+            model(F const& f) : f(f) {}
+
+            model(F&& f) : f(std::move(f)) {}
 
             std::unique_ptr<concept> copy() const override {
                 return std::make_unique<model<F>>(f);
@@ -127,11 +134,11 @@ namespace my_function {
             }
 
             void copy_to_buf(void* buf) const override {
-                new (&buffer) model<F>(f);
+                new (buf) model<F>(f);
             }
 
             void move_to_buf(void* buf) noexcept override  {
-                new (&buffer) model<F>(std::move(f));
+                new (buf) model<F>(std::move(f));
             }
 
             ~model() override = default;
@@ -142,7 +149,7 @@ namespace my_function {
         static const size_t BUFFER_SIZE = 64;
 
         union {
-            std::aligned_storage_t<BUFFER_SIZE, alignof(size_t)> buffer;
+            mutable std::aligned_storage_t<BUFFER_SIZE, alignof(size_t)> buffer;
             std::unique_ptr<concept> ptr;
         };
 
